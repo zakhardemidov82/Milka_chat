@@ -54,7 +54,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
     // Повертаємо чистий колір, але додаємо .withOpacity(0.2),
     // щоб хмаринка була ніжною (пастельною), і чорний текст на ній читався ідеально!
-    return _userColors[colorIndex].withOpacity(0.2);
+    return _userColors[colorIndex];
   }
 
   // 2. АВТОМАТИЧНО СТАВИМО ФОКУС ПРИ ВХОДІ В ЧАТ
@@ -173,7 +173,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                     margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                     decoration: BoxDecoration(
-                                      color: bubbleColor,
+                                      color: Color(bubbleColor.value),
                                       borderRadius: BorderRadius.only(
                                         topLeft: const Radius.circular(16),
                                         topRight: const Radius.circular(16),
@@ -321,7 +321,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                             margin: const EdgeInsets.symmetric(vertical: 4),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                             decoration: BoxDecoration(
-                              color: isMe ? Colors.teal : Colors.grey[300],
+                              color: isMe ? Colors.indigo : _getBubbleColor(senderId),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
