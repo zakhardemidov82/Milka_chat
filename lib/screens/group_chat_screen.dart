@@ -28,13 +28,13 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   final FocusNode _focusNode = FocusNode();
   // 🎨 ПАЛІТРА ПРИЄМНИХ КОЛЬОРІВ ДЛЯ РІЗНИХ УЧАСНИКІВ (для їхніх повідомлень зліва)
   final List<Color> _userColors = [
-    Colors.amber[100]!,       // М'який жовтий
-    Colors.blue[100]!,        // Ніжно-синій
-    Colors.lightGreen[100]!,  // Салатовий
-    Colors.purple[100]!,      // Бузковий
-    Colors.orange[100]!,      // Помаранчевий
-    Colors.pink[100]!,        // Рожевий
-    Colors.cyan[100]!,        // Бірюзовий
+    Colors.amber,       // М'який жовтий
+    Colors.blue,        // Ніжно-синій
+    Colors.lightGreen,  // Салатовий
+    Colors.purple,      // Бузковий
+    Colors.orange,      // Помаранчевий
+    Colors.pink,        // Рожевий
+    Colors.cyan,        // Бірюзовий
   ];
 
   bool get isAdmin => widget.currentUser.id == widget.creatorId;
@@ -167,7 +167,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                     margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                     decoration: BoxDecoration(
-                                      color: bubbleColor,
+                                      color: isMe
+                                          ? const Color(0xFF1E7F6B)
+                                          : _getBubbleColor(msg['sender_id']?.toString() ?? ''),
                                       borderRadius: BorderRadius.only(
                                         topLeft: const Radius.circular(16),
                                         topRight: const Radius.circular(16),
@@ -289,6 +291,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                     final msg = roomMessages[index];
                     final String senderId = msg['sender_id']?.toString() ?? '';
                     final bool isMe = senderId == widget.currentUser.id;
+                    final Color userColor = _getBubbleColor(senderId); // Твій індивідуальний колір з рядка 30!
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -306,7 +309,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                 }
                                 return Padding(
                                   padding: const EdgeInsets.only(left: 4, bottom: 2),
-                                  child: Text(authorName, style: const TextStyle(color: Colors.teal, fontSize: 12, fontWeight: FontWeight.bold)),
+                                  child: Text(authorName, style: TextStyle(color: isMe ? Colors.white : userColor, fontSize: 12, fontWeight: FontWeight.bold)),
                                 );
                               },
                             ),
