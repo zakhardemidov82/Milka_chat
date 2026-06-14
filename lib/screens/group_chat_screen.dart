@@ -41,14 +41,20 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
   // Функція, яка повертає унікальний колір для кожного користувача
   Color _getBubbleColor(String senderId) {
-    // Намагаємося перетворити ID (наприклад '2', '3') в число.
-    // Якщо ID текстовий (UUID), беремо хеш-код цього рядка.
-    final int idAsNumber = int.tryParse(senderId) ?? senderId.hashCode;
+    if (senderId.isEmpty) return Colors.grey;
 
-    // Беремо залишок від ділення на кількість кольорів у нашій палітрі
-    final int colorIndex = idAsNumber.abs() % _userColors.length;
+    // Надійний алгоритм, який перетворює БУДЬ-ЯКИЙ текст (UUID) в унікальне число
+    int hash = 0;
+    for (int i = 0; i < senderId.length; i++) {
+      hash = senderId.codeUnitAt(i) + ((hash << 5) - hash);
+    }
 
-    return _userColors[colorIndex];
+    // Беремо залишок від ділення на кількість твоїх 7 кольорів
+    final int colorIndex = hash.abs() % _userColors.length;
+
+    // Повертаємо чистий колір, але додаємо .withOpacity(0.2),
+    // щоб хмаринка була ніжною (пастельною), і чорний текст на ній читався ідеально!
+    return _userColors[colorIndex].withOpacity(0.2);
   }
 
   // 2. АВТОМАТИЧНО СТАВИМО ФОКУС ПРИ ВХОДІ В ЧАТ
@@ -167,9 +173,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                     margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                     decoration: BoxDecoration(
-                                      color: isMe
-                                          ? const Color(0xFF1E7F6B)
-                                          : _getBubbleColor(msg['sender_id']?.toString() ?? ''),
+                                      color: bubbleColor,
                                       borderRadius: BorderRadius.only(
                                         topLeft: const Radius.circular(16),
                                         topRight: const Radius.circular(16),
