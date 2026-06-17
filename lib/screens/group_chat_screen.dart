@@ -23,6 +23,7 @@ class GroupChatScreen extends StatefulWidget {
 class _GroupChatScreenState extends State<GroupChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final _supabase = Supabase.instance.client;
+  final ScrollController _scrollController = ScrollController();
 
   // 1. СТВОРЮЄМО ФОКУС-НОДУ
   final FocusNode _focusNode = FocusNode();
@@ -272,6 +273,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           ),
         ],
       ),
+      resizeToAvoidBottomInset: true,
       body: Column(
         children: [
           Expanded(
@@ -284,12 +286,18 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 // Фільтруємо повідомлення по нашому room_id
                 final roomMessages = snapshot.data!.where((msg) => msg['room_id'] == widget.roomId).toList();
 
-                if (roomMessages.isEmpty) {
-                  return const Center(child: Text('У цій кімнаті ще немає повідомлень. Напишіть щось першим!'));
+                if (roomMessages.isNotEmpty) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (_scrollController.hasClients) {
+                      _scrollController.jumpTo(
+                        _scrollController.position.maxScrollExtent);
+                    }
+                  });
                 }
 
                 return ListView.builder(
-                  padding: const EdgeInsets.all(16),
+                  controller: _scrollController,
+                  padding: const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 20),
                   itemCount: roomMessages.length,
                   itemBuilder: (context, index) {
                     final msg = roomMessages[index];
