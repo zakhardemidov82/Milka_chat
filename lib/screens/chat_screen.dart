@@ -24,10 +24,128 @@ class _ChatScreenState extends State<ChatScreen> {
   StreamSubscription<List<Map<String, dynamic>>>? _pingSubscription;
   final DateTime _screenInitTime = DateTime.now().toUtc();
 
+  // Змінні для зберігання текстів поточного користувача
+  String? _btn1;
+  String? _btn2;
+  String? _btn3;
+  String? _btn4;
+
   @override
   void initState() {
     super.initState();
     _startListeningToPings();
+    _fetchMyButtons(); // ⚡ Завантажуємо налаштування при вході
+  }
+
+  // 📥 Завантажуємо тексти кнопок з мого профілю
+  Future<void> _fetchMyButtons() async {
+    try {
+      final data = await _supabase
+          .from('profiles')
+          .select('btn1, btn2, btn3, btn4')
+          .eq('id', widget.currentUser.id)
+          .single();
+
+      if (mounted) {
+        setState(() {
+          _btn1 = data['btn1']?.toString();
+          _btn2 = data['btn2']?.toString();
+          _btn3 = data['btn3']?.toString();
+          _btn4 = data['btn4']?.toString();
+        });
+      }
+    } catch (e) {
+      debugPrint('Помилка завантаження кнопок: $e');
+    }
+  }
+
+  // 📝 Діалог для налаштування кнопки (викликається довгим натисканням)
+  void _editButtonText(int index, String? currentText) {
+    String newText = currentText ?? '';
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Налаштування кнопки $index'),
+        content: TextField(
+          controller: TextEditingController(text: newText),
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: 'Введіть текст повідомлення...',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (val) => newText = val,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Скасувати')),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                // Зберігаємо новий текст у базу
+                await _supabase
+                    .from('profiles')
+                    .update({'btn$index': newText.trim()})
+                    .eq('id', widget.currentUser.id);
+                await _fetchMyButtons(); // Оновлюємо UI
+                if (mounted) Navigator.pop(context);
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Помилка: $e')));
+              }
+            },
+            child: const Text('Зберегти'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ⚡ Відправка мікро-коду на сервер
+  void _sendQuickMessage(String code) async {
+    try {
+      await _supabase.from('messages').insert({
+        'text': code,
+        'sender_id': widget.currentUser.id,
+        'receiver_id': widget.targetReceiverId,
+      });
+      // Жодних ручних прокруток тут більше немає!
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Помилка відправки: $e')));
+    }
+  }
+
+  // 🧱 Віджет самої розумної кнопки
+  Widget _buildTacticalButton(int index, String? configuredText) {
+    final hasText = configuredText != null && configuredText.trim().isNotEmpty;
+    final buttonLabel = hasText ? '$index' : '?';
+    // Якщо налаштована - синя. Якщо пуста - сіра.
+    final bgColor = hasText ? Colors.blue.shade700 : Colors.grey.shade400;
+
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2.0),
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: bgColor,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onPressed: () {
+            if (!hasText) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Затисніть кнопку, щоб додати текст')),
+              );
+              return;
+            }
+            _sendQuickMessage('#BTN$index#'); // Відправляємо код!
+          },
+          onLongPress: () => _editButtonText(index, configuredText),
+          child: Text(
+            buttonLabel,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -55,16 +173,11 @@ class _ChatScreenState extends State<ChatScreen> {
       if (createdAtStr.isEmpty) return;
       final DateTime pingTime = DateTime.parse(createdAtStr).toUtc();
 
-      // ЧІТКА ТАКТИЧНА УМОВА:
-      // 1. Сигнал свіжий
-      // 2. Відправник — НЕ я
-      // 3. Цей сигнал відправлено САМЕ МЕНІ (receiver_id == мій id)
       if (pingTime.isAfter(_screenInitTime) &&
           senderId != widget.currentUser.id &&
           receiverId == widget.currentUser.id) {
 
         try {
-          // Беремо чесне ім'я з profiles по ID відправника
           final profileData = await _supabase
               .from('profiles')
               .select('display_name')
@@ -112,13 +225,12 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // 🚨 ВІДПРАВКА SOS З ВКАЗІВКОЮ ОТРИМУВАЧА
   void _sendPing() async {
     try {
       await _supabase.from('pings').insert({
         'sender_id': widget.currentUser.id,
         'sender_name': widget.currentUser.displayName,
-        'receiver_id': widget.targetReceiverId, // ТЕПЕР ЗАПИСУЄМО, КОМУ ЛЕТИТЬ ТРИВОГА!
+        'receiver_id': widget.targetReceiverId,
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -152,6 +264,48 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // 👁️ Автоматично позначаємо чужі повідомлення як прочитані
+  void _markMessagesAsRead(List<Map<String, dynamic>> messages) {
+    for (var msg in messages) {
+      final rId = msg['receiver_id']?.toString().trim();
+      final myId = widget.currentUser.id.toString().trim();
+      final currentStatus = msg['status']?.toString() ?? 'sent';
+
+      // Якщо повідомлення адресоване МЕНІ, і воно ще не прочитане
+      if (rId == myId && currentStatus != 'read' && currentStatus != 'прочитано') {
+
+        print('📡 Спроба оновити статус на read для повідомлення: ${msg['id']}');
+
+        _supabase
+            .from('messages')
+            .update({'status': 'read'})
+            .eq('id', msg['id'])
+            .then((_) {
+          print('✅ УСПІХ! Статус оновлено в базі.');
+        })
+            .catchError((error) {
+          print('❌ ПОМИЛКА SUPABASE під час оновлення: $error');
+        });
+      }
+    }
+  }
+
+  // ✅ Генератор галочок (одна, дві сірі, дві кольорові)
+  Widget _buildStatusIcon(String status, bool isMyMessage) {
+    if (!isMyMessage) return const SizedBox.shrink(); // Чужим галочки не малюємо
+
+    // Оскільки твої бульбашки сині, 'прочитано' зробимо салатовим для контрасту
+    if (status == 'read' || status == 'прочитано') {
+      return const Icon(Icons.done_all, color: Colors.greenAccent, size: 16);
+    } else if (status == 'delivered' || status == 'доставлено') {
+      return const Icon(Icons.done_all, color: Colors.white70, size: 16);
+    } else {
+      // За замовчуванням 'sent' / 'відправлено'
+      return const Icon(Icons.check, color: Colors.white70, size: 16);
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -183,7 +337,7 @@ class _ChatScreenState extends State<ChatScreen> {
               stream: _supabase
                   .from('messages')
                   .stream(primaryKey: ['id'])
-                  .order('created_at', ascending: true),
+                  .order('created_at', ascending: false), // 👈 НАЙНОВІШІ ПЕРШІ
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
@@ -205,13 +359,34 @@ class _ChatScreenState extends State<ChatScreen> {
                   return const Center(child: Text('Приватна переписка порожня.'));
                 }
 
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _markMessagesAsRead(privateMessages);
+                });
+
+
                 return ListView.builder(
                   padding: const EdgeInsets.all(16),
+                  reverse: true, // 👈 МАГІЯ: СПИСОК ПЕРЕВЕРНУТИЙ
                   itemCount: privateMessages.length,
                   itemBuilder: (context, index) {
                     final msg = privateMessages[index];
                     final String senderId = msg['sender_id']?.toString() ?? '';
                     final bool isMe = senderId == widget.currentUser.id;
+                    final String status = msg['status']?.toString() ?? 'sent';
+
+                    // 👈 1. Обчислюємо, чи потрібно показувати попередження
+                    bool showDeliveryWarning = false;
+                    final String createdAtStr = msg['created_at']?.toString() ?? ''; // Перевір назву стовпця часу в базі!
+
+                    if (isMe && status == 'sent' && createdAtStr.isNotEmpty) {
+                      final DateTime createdAt = DateTime.parse(createdAtStr).toLocal();
+                      final Duration difference = DateTime.now().difference(createdAt);
+
+                      // Якщо пройшло 10 хвилин (для тестів можеш поставити 1 хвилину: difference.inMinutes >= 1)
+                      if (difference.inMinutes >= 1) {
+                        showDeliveryWarning = true;
+                      }
+                    }
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -220,6 +395,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         children: [
                           if (!isMe)
                             FutureBuilder<List<Map<String, dynamic>>>(
+                              // ... (тут твій код з іменем абонента залишається без змін)
                               future: _supabase.from('profiles').select('display_name').eq('id', senderId),
                               builder: (context, profileSnapshot) {
                                 String name = 'Абонент [$senderId]';
@@ -232,6 +408,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                 );
                               },
                             ),
+
+                          // Головний контейнер з повідомленням (залишається як ми щойно зробили)
                           Container(
                             margin: const EdgeInsets.symmetric(vertical: 4),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -239,11 +417,47 @@ class _ChatScreenState extends State<ChatScreen> {
                               color: isMe ? Colors.indigo : Colors.grey[300],
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: Text(
-                              msg['text'] ?? '',
-                              style: TextStyle(color: isMe ? Colors.white : Colors.black87, fontSize: 16),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    msg['text'] ?? '',
+                                    style: TextStyle(color: isMe ? Colors.white : Colors.black87, fontSize: 16),
+                                  ),
+                                ),
+                                if (isMe) ...[
+                                  const SizedBox(width: 6),
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 2),
+                                    child: _buildStatusIcon(status, isMe),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
+
+                          // 👈 2. Малюємо технічне повідомлення ПІД бульбашкою, якщо виконалась умова
+                          if (showDeliveryWarning)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 2, bottom: 6, right: 4),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.info_outline, size: 14, color: Colors.grey),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Абонент поза мережею. Доставимо пізніше.',
+                                    style: TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 12,
+                                        fontStyle: FontStyle.italic
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     );
@@ -252,23 +466,43 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
-          Padding(
+
+          // 🎛️ Швидкі кнопки + Поле вводу
+          Container(
+            color: Colors.white,
             padding: const EdgeInsets.all(8.0),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    decoration: const InputDecoration(
-                      hintText: 'Напишіть приватне повідомлення...',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _sendMessage(),
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildTacticalButton(1, _btn1),
+                    _buildTacticalButton(2, _btn2),
+                    _buildTacticalButton(3, _btn3),
+                    _buildTacticalButton(4, _btn4),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.send, color: Colors.indigo),
-                  onPressed: _sendMessage,
+                const SizedBox(height: 8),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _messageController,
+                        decoration: const InputDecoration(
+                          hintText: 'Напишіть повідомлення...',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        ),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.send, color: Colors.indigo),
+                      onPressed: _sendMessage,
+                    ),
+                  ],
                 ),
               ],
             ),
