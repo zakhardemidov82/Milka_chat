@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_model.dart';
+import 'package:image_picker/image_picker.dart';
 
 class ChatScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -20,6 +21,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final _supabase = Supabase.instance.client;
+  final ImagePicker _picker = ImagePicker();
 
   StreamSubscription<List<Map<String, dynamic>>>? _pingSubscription;
   final DateTime _screenInitTime = DateTime.now().toUtc();
@@ -264,6 +266,45 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // 📸 Функція вибору та відправки фото
+  Future<void> _sendImage() async {
+    try {
+      // 1. Відкриваємо галерею
+      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+      if (image == null) return; // Якщо користувач передумав і закрив галерею
+
+      // 2. Читаємо фото як байти (ідеально для Web та Mobile)
+      final bytes = await image.readAsBytes();
+
+      // Генеруємо унікальне ім'я файлу на основі часу
+      final fileExt = image.name.split('.').last;
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+      final filePath = 'uploads/$fileName';
+
+      // 3. Завантажуємо в наш бакет chat_media
+      await _supabase.storage.from('chat_media').uploadBinary(
+        filePath,
+        bytes,
+      );
+
+      // 4. Отримуємо пряме публічне посилання на фото
+      final imageUrl = _supabase.storage.from('chat_media').getPublicUrl(filePath);
+
+      // 5. Записуємо повідомлення в базу (з новим полем image_url)
+      await _supabase.from('messages').insert({
+        'sender_id': widget.currentUser.id, // Заміни на свою змінну, якщо вона зветься інакше
+        'receiver_id': widget.targetReceiverId,   // Заміни на свою змінну
+        'text': '📸 Фото',                  // Текст-заглушка
+        'image_url': imageUrl,              // 👈 Наша нова колонка!
+        'status': 'sent',
+      });
+
+      print('✅ Фото успішно відправлено!');
+    } catch (e) {
+      print('❌ Помилка відправки фото: $e');
+    }
+  }
+
   // 👁️ Автоматично позначаємо чужі повідомлення як прочитані
   void _markMessagesAsRead(List<Map<String, dynamic>> messages) {
     for (var msg in messages) {
@@ -374,28 +415,29 @@ class _ChatScreenState extends State<ChatScreen> {
                     final bool isMe = senderId == widget.currentUser.id;
                     final String status = msg['status']?.toString() ?? 'sent';
 
-                    // 👈 1. Обчислюємо, чи потрібно показувати попередження
+                    // --- 1. Логіка радара: попередження про недоставку ---
                     bool showDeliveryWarning = false;
-                    final String createdAtStr = msg['created_at']?.toString() ?? ''; // Перевір назву стовпця часу в базі!
+                    final String createdAtStr = msg['created_at']?.toString() ?? '';
 
                     if (isMe && status == 'sent' && createdAtStr.isNotEmpty) {
                       final DateTime createdAt = DateTime.parse(createdAtStr).toLocal();
                       final Duration difference = DateTime.now().difference(createdAt);
-
-                      // Якщо пройшло 10 хвилин (для тестів можеш поставити 1 хвилину: difference.inMinutes >= 1)
-                      if (difference.inMinutes >= 1) {
+                      if (difference.inMinutes >= 1) { // 👈 Тут стоїть 1 хвилина, можеш повернути на 10
                         showDeliveryWarning = true;
                       }
                     }
+
+                    // --- 2. Перевірка наявності фото ---
+                    final String? imageUrl = msg['image_url']?.toString();
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                       child: Column(
                         crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                         children: [
+                          // --- 3. Ім'я співрозмовника (FutureBuilder) ---
                           if (!isMe)
                             FutureBuilder<List<Map<String, dynamic>>>(
-                              // ... (тут твій код з іменем абонента залишається без змін)
                               future: _supabase.from('profiles').select('display_name').eq('id', senderId),
                               builder: (context, profileSnapshot) {
                                 String name = 'Абонент [$senderId]';
@@ -409,7 +451,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               },
                             ),
 
-                          // Головний контейнер з повідомленням (залишається як ми щойно зробили)
+                          // --- 4. Головний контейнер (Бульбашка повідомлення) ---
                           Container(
                             margin: const EdgeInsets.symmetric(vertical: 4),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -417,28 +459,57 @@ class _ChatScreenState extends State<ChatScreen> {
                               color: isMe ? Colors.indigo : Colors.grey[300],
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.end,
+                            child: Column(
+                              crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min, // Щоб бульбашка не розтягувалась
                               children: [
-                                Flexible(
-                                  child: Text(
-                                    msg['text'] ?? '',
-                                    style: TextStyle(color: isMe ? Colors.white : Colors.black87, fontSize: 16),
-                                  ),
-                                ),
-                                if (isMe) ...[
-                                  const SizedBox(width: 6),
+                                // Якщо є фото — малюємо його зверху
+                                if (imageUrl != null && imageUrl.isNotEmpty)
                                   Padding(
-                                    padding: const EdgeInsets.only(bottom: 2),
-                                    child: _buildStatusIcon(status, isMe),
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(
+                                        imageUrl,
+                                        width: 200,
+                                        fit: BoxFit.cover,
+                                        loadingBuilder: (context, child, loadingProgress) {
+                                          if (loadingProgress == null) return child;
+                                          return const SizedBox(
+                                              width: 200, height: 200,
+                                              // Білий індикатор для твоїх синіх бульбашок, синій для сірих
+                                              child: Center(child: CircularProgressIndicator(color: Colors.white))
+                                          );
+                                        },
+                                      ),
+                                    ),
                                   ),
-                                ],
+
+                                // Текст повідомлення та галочки (внизу під фото, або самі по собі)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        msg['text'] ?? '',
+                                        style: TextStyle(color: isMe ? Colors.white : Colors.black87, fontSize: 16),
+                                      ),
+                                    ),
+                                    if (isMe) ...[
+                                      const SizedBox(width: 6),
+                                      Padding(
+                                        padding: const EdgeInsets.only(bottom: 2),
+                                        child: _buildStatusIcon(status, isMe),
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               ],
                             ),
                           ),
 
-                          // 👈 2. Малюємо технічне повідомлення ПІД бульбашкою, якщо виконалась умова
+                          // --- 5. Технічне повідомлення про недоставку (під бульбашкою) ---
                           if (showDeliveryWarning)
                             const Padding(
                               padding: EdgeInsets.only(top: 2, bottom: 6, right: 4),
@@ -497,6 +568,10 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                         onSubmitted: (_) => _sendMessage(),
                       ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.image, color: Colors.indigo),
+                      onPressed: _sendImage, // Викликаємо нашу нову функцію
                     ),
                     IconButton(
                       icon: const Icon(Icons.send, color: Colors.indigo),
