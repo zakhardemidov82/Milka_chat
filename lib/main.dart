@@ -3,14 +3,18 @@ import 'package:milka_chat/screens/rooms_list_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:milka_chat/models/user_model.dart';
 import 'package:milka_chat/screens/chat_screen.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Наша залізна ініціалізація Supabase
+  // Завантажуємо наш секретний файл
+  await dotenv.load(fileName: ".env");
+
+  // Ініціалізуємо Supabase, беручи дані з сейфа
   await Supabase.initialize(
-    url: 'https://cdiicutdbugowjzvridb.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkaWljdXRkYnVnb3dqenZyaWRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NTU3MzEsImV4cCI6MjA5NjQzMTczMX0.uyORJMnyYu1uDmSlpeJtZ1UOGCrZFPYcSy5UlJMgBEk',
+    url: dotenv.env['SUPABASE_URL']!,
+    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
 
   runApp(const MyApp());

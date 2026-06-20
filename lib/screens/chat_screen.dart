@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_model.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 
 class ChatScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -267,41 +268,58 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // 📸 Функція вибору та відправки фото
-  Future<void> _sendImage() async {
+  Future<void> _sendMediaFile() async {
     try {
-      // 1. Відкриваємо галерею
-      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image == null) return; // Якщо користувач передумав і закрив галерею
+      // 1. Відкриваємо системне вікно вибору БУДЬ-ЯКОГО файлу
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.any, // Дозволяємо вибирати все: фото, відео, доки
+        withData: true,     // Обов'язково для читання байтів (працює всюди)
+      );
 
-      // 2. Читаємо фото як байти (ідеально для Web та Mobile)
-      final bytes = await image.readAsBytes();
+      if (result == null || result.files.isEmpty) return; // Користувач скасував вибір
 
-      // Генеруємо унікальне ім'я файлу на основі часу
-      final fileExt = image.name.split('.').last;
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
-      final filePath = 'uploads/$fileName';
+      final selectedFile = result.files.first;
+      final bytes = selectedFile.bytes;
+      if (bytes == null) return;
 
-      // 3. Завантажуємо в наш бакет chat_media
+      // 2. Визначаємо тип файлу за його розширенням
+      final fileExt = selectedFile.extension?.toLowerCase() ?? '';
+      String messageType = 'file'; // За замовчуванням — звичайний документ
+
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(fileExt)) {
+        messageType = 'image';
+      } else if (['mp4', 'mov', 'avi', 'mkv', '3gp'].contains(fileExt)) {
+        messageType = 'video';
+      }
+
+      // 3. Генеруємо унікальне ім'я для бакета, щоб файли не перезаписували один одного
+      final uniqueFileName = '${DateTime.now().millisecondsSinceEpoch}_${selectedFile.name}';
+      final filePath = 'uploads/$messageType/$uniqueFileName';
+
+      // 4. Завантажуємо в наш уже готовий бакет 'chat_media'
       await _supabase.storage.from('chat_media').uploadBinary(
         filePath,
         bytes,
       );
 
-      // 4. Отримуємо пряме публічне посилання на фото
-      final imageUrl = _supabase.storage.from('chat_media').getPublicUrl(filePath);
+      // 5. Отримуємо пряме публічне посилання
+      final fileUrl = _supabase.storage.from('chat_media').getPublicUrl(filePath);
 
-      // 5. Записуємо повідомлення в базу (з новим полем image_url)
+      // 6. Записуємо повідомлення в базу Supabase
       await _supabase.from('messages').insert({
-        'sender_id': widget.currentUser.id, // Заміни на свою змінну, якщо вона зветься інакше
-        'receiver_id': widget.targetReceiverId,   // Заміни на свою змінну
-        'text': '📸 Фото',                  // Текст-заглушка
-        'image_url': imageUrl,              // 👈 Наша нова колонка!
-        'status': 'sent',
+        'sender_id': widget.currentUser.id,
+        'receiver_id': widget.targetReceiverId, // Твоя змінна для отримувача
+        'text': selectedFile.name, // В текст запишемо оригінальне ім'я файлу
+        'file_url': fileUrl,       // Універсальне поле для лінка
+        'message_type': messageType // 'image', 'video' або 'file'
       });
 
-      print('✅ Фото успішно відправлено!');
+      print('🚀 Медіа-повідомлення типу [$messageType] успішно відправлено!');
+
     } catch (e) {
-      print('❌ Помилка відправки фото: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('🚨 Помилка відправки файлу: $e')),
+      );
     }
   }
 
@@ -570,8 +588,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.image, color: Colors.indigo),
-                      onPressed: _sendImage, // Викликаємо нашу нову функцію
+                      icon: const Icon(Icons.attach_file, color: Colors.indigo), // Змінили іконку на скріпку
+                      onPressed: _sendMediaFile, // Викликаємо нашу нову універсальну функцію файлів
                     ),
                     IconButton(
                       icon: const Icon(Icons.send, color: Colors.indigo),
